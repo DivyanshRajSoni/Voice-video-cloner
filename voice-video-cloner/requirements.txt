@@ -20,9 +20,9 @@ onnxruntime>=1.16.0
 TTS>=0.22.0
 edge-tts>=7.0.0
 
-# Speech-to-Text (pick one)
+# Speech-to-Text
 openai-whisper>=20231117
-# faster-whisper>=0.10.0  # Alternative: lighter weight
+faster-whisper>=1.0.0
 
 # Deep Learning
 torch>=2.0.0
