@@ -110,14 +110,82 @@ class FaceSwapper:
 
         return None
 
+    def _detect_with_strategies(self, img: np.ndarray):
+        """Try multiple detection strategies for difficult images (cartoons etc.)."""
+        _largest = lambda faces: max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+
+        h, w = img.shape[:2]
+
+        # Strategy 1: try with larger input size (640x640) and progressively lower thresholds
+        self.det_model.prepare(ctx_id=0, input_size=(640, 640), det_thresh=0.5)
+        for thresh in [0.5, 0.3, 0.1, 0.05, 0.02]:
+            faces = self.detect_faces(img, det_thresh=thresh)
+            if faces:
+                print(f"[FaceSwapper] Detected face at 640px with threshold={thresh}")
+                return _largest(faces)
+
+        # Strategy 2: upscale to 1024px if small
+        if max(h, w) < 1024:
+            scale = 1024 / max(h, w)
+            resized = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+            for thresh in [0.3, 0.1, 0.05, 0.02]:
+                faces = self.detect_faces(resized, det_thresh=thresh)
+                if faces:
+                    print(f"[FaceSwapper] Detected face after upscale-1024 with threshold={thresh}")
+                    return _largest(faces)
+
+        # Strategy 3: increase contrast + sharpen (helps with flat cartoon colors)
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        enhanced = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+        enhanced = cv2.filter2D(enhanced, -1, kernel)
+        for thresh in [0.3, 0.1, 0.05, 0.02]:
+            faces = self.detect_faces(enhanced, det_thresh=thresh)
+            if faces:
+                print(f"[FaceSwapper] Detected face after enhancement with threshold={thresh}")
+                return _largest(faces)
+
+        # Strategy 4: upscale the enhanced image  
+        if max(h, w) < 1024:
+            scale = 1024 / max(h, w)
+            resized = cv2.resize(enhanced, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+        else:
+            resized = enhanced
+        for thresh in [0.1, 0.05, 0.02]:
+            faces = self.detect_faces(resized, det_thresh=thresh)
+            if faces:
+                print(f"[FaceSwapper] Detected face after upscale+enhance with threshold={thresh}")
+                return _largest(faces)
+
+        # Strategy 5: try center crop (face might be in center with lots of background)
+        crop_h, crop_w = int(h * 0.7), int(w * 0.7)
+        y1, x1 = (h - crop_h) // 2, (w - crop_w) // 2
+        cropped = img[y1:y1+crop_h, x1:x1+crop_w]
+        scale = 1024 / max(crop_h, crop_w)
+        cropped = cv2.resize(cropped, (int(crop_w * scale), int(crop_h * scale)), interpolation=cv2.INTER_CUBIC)
+        for thresh in [0.3, 0.1, 0.05, 0.02]:
+            faces = self.detect_faces(cropped, det_thresh=thresh)
+            if faces:
+                print(f"[FaceSwapper] Detected face after center-crop with threshold={thresh}")
+                return _largest(faces)
+
+        # Reset input size to 320 for video frame processing (speed)
+        self.det_model.prepare(ctx_id=0, input_size=(320, 320), det_thresh=0.5)
+        return None
+
     def extract_reference_face(self, image_path: str):
-        """Extract reference face from an image file."""
+        """Extract reference face from an image file. Uses aggressive detection for cartoons."""
         self.initialize()
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"Could not read image: {image_path}")
 
-        face = self.get_best_face(img, lenient=True)
+        # Use aggressive multi-strategy detection for reference images
+        face = self._detect_with_strategies(img)
         if face is None:
             raise ValueError(
                 f"No face detected in reference image: {image_path}. "
