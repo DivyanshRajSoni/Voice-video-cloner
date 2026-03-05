@@ -117,7 +117,8 @@ class BackgroundChanger:
             raise RuntimeError("huggingface_hub not installed")
 
         token = os.environ.get("HF_TOKEN", None)
-        client = InferenceClient(token=token)
+        if not token:
+            logger.warning("HF_TOKEN not set — API calls may fail or be rate-limited")
 
         # Enhance the prompt for better background quality
         enhanced = (
@@ -126,22 +127,37 @@ class BackgroundChanger:
         )
 
         # Models to try in order (fast → quality)
+        # Each entry: (model_id, provider) — use hf-inference provider to avoid
+        # third-party routing (nscale etc.) that requires separate API keys
         models = [
-            "black-forest-labs/FLUX.1-schnell",
-            "stabilityai/stable-diffusion-xl-base-1.0",
+            ("black-forest-labs/FLUX.1-schnell", "hf-inference"),
+            ("stabilityai/stable-diffusion-xl-base-1.0", "hf-inference"),
+            # Fallback: let huggingface_hub pick the provider automatically
+            ("black-forest-labs/FLUX.1-schnell", None),
+            ("stabilityai/stable-diffusion-xl-base-1.0", None),
         ]
 
         image = None
-        for model_id in models:
+        for model_id, provider in models:
             try:
-                logger.info(f"Generating background with {model_id}...")
+                # Build client kwargs
+                client_kwargs = {"token": token}
+                gen_kwargs = {
+                    "prompt": enhanced,
+                    "model": model_id,
+                    "width": width,
+                    "height": height,
+                }
+
+                if provider:
+                    client_kwargs["provider"] = provider
+                    logger.info(f"Generating background with {model_id} (provider={provider})...")
+                else:
+                    logger.info(f"Generating background with {model_id} (auto provider)...")
+
+                client = InferenceClient(**client_kwargs)
                 t0 = time.time()
-                image = client.text_to_image(
-                    prompt=enhanced,
-                    model=model_id,
-                    width=width,
-                    height=height,
-                )
+                image = client.text_to_image(**gen_kwargs)
                 logger.info(f"Background generated in {time.time()-t0:.1f}s with {model_id}")
                 break
             except Exception as e:
