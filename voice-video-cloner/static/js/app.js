@@ -275,8 +275,8 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("Please upload your source video.");
             return;
         }
-        if (!targetFace.files.length && !cartoonFaceValue) {
-            alert("Please select a cartoon character or upload a target face image.");
+        if ((!targetFace || !targetFace.files.length) && !cartoonFaceValue) {
+            alert("Please select a character face from the gallery.");
             return;
         }
         if (!targetVoice.files.length) {
@@ -287,7 +287,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Build form data
         const formData = new FormData();
         formData.append("source_video", sourceVideo.files[0]);
-        if (targetFace.files.length) {
+        if (targetFace && targetFace.files.length) {
             formData.append("target_face", targetFace.files[0]);
         }
         if (cartoonFaceValue) {
