@@ -18,6 +18,7 @@ onnxruntime>=1.16.0
 
 # Voice Cloning (Coqui TTS with XTTS-v2)
 TTS>=0.22.0
+edge-tts>=7.0.0
 
 # Speech-to-Text (pick one)
 openai-whisper>=20231117
