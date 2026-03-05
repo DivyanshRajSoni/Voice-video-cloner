@@ -1,13 +1,14 @@
 """
 Voice Cloner Module
-Uses Edge-TTS (Microsoft neural voices) for speech synthesis
-and faster-whisper for transcription.
-Transcribes source speech, then re-synthesizes in a selected neural voice.
+Uses Edge-TTS (Microsoft neural voices) for speech synthesis,
+faster-whisper for transcription, and deep-translator for translation.
+Transcribes source speech → translates to target language → synthesizes in neural voice.
 """
 
 import os
 import asyncio
 import edge_tts
+from deep_translator import GoogleTranslator
 
 
 # ─── Available voice personas ──────────────────────────────────
@@ -107,6 +108,14 @@ class VoiceCloner:
         self._initialized = True
         print("[VoiceCloner] Whisper model loaded.")
 
+    # ── Language code mapping for Google Translate ──
+    TRANSLATE_LANG_MAP = {
+        "en": "en", "hi": "hi", "es": "es", "fr": "fr", "de": "de",
+        "it": "it", "pt": "pt", "pl": "pl", "tr": "tr", "ru": "ru",
+        "nl": "nl", "cs": "cs", "ar": "ar", "zh-cn": "zh-CN", "zh": "zh-CN",
+        "ja": "ja", "ko": "ko",
+    }
+
     def clone_voice_from_audio(
         self,
         source_audio_path: str,
@@ -116,32 +125,39 @@ class VoiceCloner:
         voice_name: str = None
     ) -> str:
         """
-        Transform voice: transcribe source audio, then re-synthesize
-        using a neural voice from Edge-TTS.
-        
-        Args:
-            source_audio_path: Audio from the source video.
-            target_speaker_wav: Reference audio (used for voice selection hint).
-            output_path: Path to save output audio.
-            language: Language code.
-            voice_name: Specific persona key or Edge-TTS voice name.
-            
-        Returns:
-            Path to the output audio file.
+        Transform voice: transcribe source audio, translate to target
+        language, then re-synthesize using a neural voice.
         """
         self.initialize()
 
-        # Step 1: Transcribe source audio
-        print("[VoiceCloner] Transcribing source audio...")
-        transcript = self._transcribe_audio(source_audio_path, language)
+        # Step 1: Transcribe source audio (auto-detect language)
+        print("[VoiceCloner] Transcribing source audio (auto-detect language)...")
+        transcript, detected_lang = self._transcribe_audio_with_detection(source_audio_path)
 
         if not transcript or transcript.strip() == "":
             print("[VoiceCloner] Warning: Empty transcript. Using fallback text.")
             transcript = "Hello, this is a voice cloning demonstration."
+            detected_lang = "en"
 
-        print(f"[VoiceCloner] Transcript ({len(transcript)} chars): {transcript[:120]}...")
+        print(f"[VoiceCloner] Transcript ({len(transcript)} chars, detected={detected_lang}): {transcript[:120]}...")
 
-        # Step 2: Select voice
+        # Step 2: Translate to target language (if different from detected)
+        target_lang_code = self.TRANSLATE_LANG_MAP.get(language, language)
+        detected_base = detected_lang.split("-")[0] if detected_lang else "en"
+        target_base = language.split("-")[0] if language else "en"
+
+        if detected_base != target_base:
+            print(f"[VoiceCloner] Translating {detected_lang} → {language}...")
+            translated = self._translate_text(transcript, detected_lang, target_lang_code)
+            if translated:
+                print(f"[VoiceCloner] Translated ({len(translated)} chars): {translated[:120]}...")
+                transcript = translated
+            else:
+                print("[VoiceCloner] Translation failed, using original transcript.")
+        else:
+            print(f"[VoiceCloner] Source and target language match ({detected_lang}), no translation needed.")
+
+        # Step 3: Select voice
         if voice_name and voice_name in VOICE_PERSONAS:
             selected_voice = VOICE_PERSONAS[voice_name]
         elif voice_name:
@@ -151,31 +167,68 @@ class VoiceCloner:
 
         print(f"[VoiceCloner] Using voice: {selected_voice}")
 
-        # Step 3: Synthesize with Edge-TTS
+        # Step 4: Synthesize with Edge-TTS
         print("[VoiceCloner] Synthesizing speech...")
         self._synthesize_edge_tts(transcript, selected_voice, output_path)
 
         print(f"[VoiceCloner] Output saved to {output_path}")
         return output_path
 
-    def _transcribe_audio(self, audio_path: str, language: str = "en") -> str:
+    def _transcribe_audio_with_detection(self, audio_path: str) -> tuple:
         """
-        Transcribe audio using faster-whisper.
+        Transcribe audio using faster-whisper with automatic language detection.
+        Returns (transcript_text, detected_language_code).
         """
         try:
-            lang_code = language.split("-")[0] if "-" in language else language
-            if lang_code == "zh":
-                lang_code = "zh"
             segments, info = self.whisper_model.transcribe(
                 audio_path,
-                language=lang_code,
                 beam_size=5
             )
             text = " ".join([seg.text for seg in segments])
-            print(f"[VoiceCloner] Detected language: {info.language} (prob: {info.language_probability:.2f})")
-            return text.strip()
+            detected = info.language or "en"
+            print(f"[VoiceCloner] Detected language: {detected} (prob: {info.language_probability:.2f})")
+            return text.strip(), detected
         except Exception as e:
             print(f"[VoiceCloner] Transcription error: {e}")
+            return "", "en"
+
+    def _translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        """
+        Translate text using Google Translate (via deep-translator).
+        Handles long texts by chunking at ~4500 chars.
+        """
+        try:
+            src = source_lang.split("-")[0] if source_lang else "auto"
+            # Use 'auto' for detection if source is uncertain
+            if src in ("", "unknown"):
+                src = "auto"
+
+            max_chunk = 4500
+            if len(text) <= max_chunk:
+                result = GoogleTranslator(source=src, target=target_lang).translate(text)
+                return result or text
+
+            # Chunk long text at sentence boundaries
+            chunks = []
+            current = ""
+            for sentence in text.replace(". ", ".|").split("|"):
+                if len(current) + len(sentence) > max_chunk:
+                    if current:
+                        chunks.append(current)
+                    current = sentence
+                else:
+                    current += sentence
+            if current:
+                chunks.append(current)
+
+            translated_parts = []
+            for chunk in chunks:
+                part = GoogleTranslator(source=src, target=target_lang).translate(chunk)
+                translated_parts.append(part or chunk)
+
+            return " ".join(translated_parts)
+        except Exception as e:
+            print(f"[VoiceCloner] Translation error: {e}")
             return ""
 
     def _synthesize_edge_tts(self, text: str, voice: str, output_path: str):

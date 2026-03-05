@@ -30,3 +30,6 @@ torchaudio>=2.0.0
 
 # Utilities
 pillow>=10.0.0
+
+# Translation
+deep-translator>=1.11.4
