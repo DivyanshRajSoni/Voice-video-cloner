@@ -222,7 +222,7 @@ class VideoProcessor:
 
         # Match audio duration to video duration
         if audio.duration > video.duration:
-            audio = audio.with_subclip(0, video.duration)
+            audio = audio.subclipped(0, video.duration)
 
         final = video.with_audio(audio)
         final.write_videofile(
