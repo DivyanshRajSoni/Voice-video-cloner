@@ -26,13 +26,37 @@ document.addEventListener("DOMContentLoaded", () => {
     // ─── Load Cartoon Faces ──────────────────────────────
     async function loadCartoonFaces() {
         try {
-            const response = await fetch("/api/cartoon-faces");
-            const data = await response.json();
+            // Load both human and cartoon faces
+            const [humanRes, cartoonRes] = await Promise.all([
+                fetch("/api/human-faces"),
+                fetch("/api/cartoon-faces")
+            ]);
+            const humanData = await humanRes.json();
+            const cartoonData = await cartoonRes.json();
+
+            // Populate human grid
+            const humanGrid = document.getElementById("humanGrid");
+            humanGrid.innerHTML = "";
+            if (humanData.faces && humanData.faces.length > 0) {
+                humanData.faces.forEach((face) => {
+                    const card = document.createElement("div");
+                    card.className = "cartoon-card";
+                    card.dataset.filename = face.filename;
+                    card.innerHTML = `
+                        <img src="${face.url}" alt="${face.name}" loading="lazy">
+                        <span class="cartoon-name">${face.name}</span>
+                    `;
+                    card.addEventListener("click", () => selectCartoonFace(card, face));
+                    humanGrid.appendChild(card);
+                });
+            }
+
+            // Populate cartoon grid
             const grid = document.getElementById("cartoonGrid");
             grid.innerHTML = "";
 
-            if (data.faces && data.faces.length > 0) {
-                data.faces.forEach((face) => {
+            if (cartoonData.faces && cartoonData.faces.length > 0) {
+                cartoonData.faces.forEach((face) => {
                     const card = document.createElement("div");
                     card.className = "cartoon-card";
                     card.dataset.filename = face.filename;
@@ -43,11 +67,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     card.addEventListener("click", () => selectCartoonFace(card, face));
                     grid.appendChild(card);
                 });
-            } else {
-                grid.innerHTML = '<p style="color: var(--text-muted); font-size: 13px; grid-column: 1/-1; text-align: center; padding: 20px;">No cartoon faces found. Add images to static/cartoon_faces/ folder.</p>';
+            }
+
+            if ((!humanData.faces || humanData.faces.length === 0) && (!cartoonData.faces || cartoonData.faces.length === 0)) {
+                grid.innerHTML = '<p style="color: var(--text-muted); font-size: 13px; grid-column: 1/-1; text-align: center; padding: 20px;">No preset faces found.</p>';
             }
         } catch (err) {
-            console.error("Failed to load cartoon faces:", err);
+            console.error("Failed to load faces:", err);
         }
     }
 

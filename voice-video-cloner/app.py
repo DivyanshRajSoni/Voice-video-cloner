@@ -102,7 +102,9 @@ def save_upload(file, prefix="file"):
 # ─── Routes ──────────────────────────────────────────────────────
 
 CARTOON_FACES_DIR = os.path.join(BASE_DIR, "static", "cartoon_faces")
+HUMAN_FACES_DIR = os.path.join(BASE_DIR, "static", "human_faces")
 os.makedirs(CARTOON_FACES_DIR, exist_ok=True)
+os.makedirs(HUMAN_FACES_DIR, exist_ok=True)
 
 
 @app.route("/")
@@ -111,21 +113,52 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/api/cartoon-faces")
-def list_cartoon_faces():
-    """List available cartoon character faces."""
+# ── Cartoon character name mapping ──
+CARTOON_NAMES = {
+    "character_1": "Animated Boy",
+    "character_2": "Animated Girl",
+    "character_3": "Toon Hero",
+    "character_4": "Toon Heroine",
+    "character_5": "Toon Character",
+}
+
+# ── Human face name mapping ──
+HUMAN_NAMES = {
+    "india_male": "Arjun (India)",
+    "usa_female": "Emily (USA)",
+    "uk_male": "James (UK)",
+    "russia_female": "Anastasia (Russia)",
+    "australia_male": "Liam (Australia)",
+}
+
+
+def _list_faces(directory, subfolder, name_map):
+    """List face images in a directory with mapped display names."""
     faces = []
-    if os.path.exists(CARTOON_FACES_DIR):
-        for fname in sorted(os.listdir(CARTOON_FACES_DIR)):
+    if os.path.exists(directory):
+        for fname in sorted(os.listdir(directory)):
             ext = os.path.splitext(fname)[1].lower()
             if ext in ALLOWED_IMAGE_EXT:
-                name = os.path.splitext(fname)[0].replace("_", " ").replace("-", " ").title()
+                key = os.path.splitext(fname)[0]
+                name = name_map.get(key, key.replace("_", " ").replace("-", " ").title())
                 faces.append({
                     "filename": fname,
                     "name": name,
-                    "url": url_for("static", filename=f"cartoon_faces/{fname}")
+                    "url": url_for("static", filename=f"{subfolder}/{fname}")
                 })
-    return jsonify({"faces": faces})
+    return faces
+
+
+@app.route("/api/cartoon-faces")
+def list_cartoon_faces():
+    """List available cartoon character faces."""
+    return jsonify({"faces": _list_faces(CARTOON_FACES_DIR, "cartoon_faces", CARTOON_NAMES)})
+
+
+@app.route("/api/human-faces")
+def list_human_faces():
+    """List available AI-generated human faces."""
+    return jsonify({"faces": _list_faces(HUMAN_FACES_DIR, "human_faces", HUMAN_NAMES)})
 
 
 @app.route("/api/clone", methods=["POST"])
@@ -173,11 +206,15 @@ def start_clone():
     # Save uploads
     source_path = save_upload(source_video, "source")
 
-    # Determine face path: cartoon face or uploaded file
+    # Determine face path: preset face (cartoon/human) or uploaded file
     if cartoon_face:
-        face_path = os.path.join(CARTOON_FACES_DIR, secure_filename(cartoon_face))
+        safe = secure_filename(cartoon_face)
+        # Check both cartoon and human face directories
+        face_path = os.path.join(CARTOON_FACES_DIR, safe)
         if not os.path.exists(face_path):
-            return jsonify({"error": "Selected cartoon face not found."}), 400
+            face_path = os.path.join(HUMAN_FACES_DIR, safe)
+        if not os.path.exists(face_path):
+            return jsonify({"error": "Selected face not found."}), 400
     else:
         target_face = request.files["target_face"]
         face_path = save_upload(target_face, "face")
