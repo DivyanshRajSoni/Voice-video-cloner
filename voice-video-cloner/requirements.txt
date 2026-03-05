@@ -17,6 +17,9 @@ insightface>=0.7.3
 onnxruntime>=1.16.0
 # onnxruntime-gpu>=1.16.0  # Uncomment for GPU acceleration
 
+# Background Segmentation
+rembg>=2.0.50
+
 # Voice Synthesis
 edge-tts>=7.0.0
 

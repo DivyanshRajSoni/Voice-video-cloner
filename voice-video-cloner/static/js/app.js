@@ -22,6 +22,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentJobId = null;
     let pollInterval = null;
     let selectedCartoonFace = null;
+    let bgEnabled = false;
+    let bgMode = "prompt"; // "prompt" or "upload"
 
     // ─── Load Cartoon Faces ──────────────────────────────
     async function loadCartoonFaces() {
@@ -110,6 +112,125 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Load cartoon faces on page load
     loadCartoonFaces();
+
+    // ─── Background Change UI ────────────────────────────
+    const bgToggle = document.getElementById("bgToggle");
+    const bgOptions = document.getElementById("bgOptions");
+    const bgTabs = document.querySelectorAll(".bg-tab");
+    const bgPromptMode = document.getElementById("bgPromptMode");
+    const bgUploadMode = document.getElementById("bgUploadMode");
+    const bgPromptInput = document.getElementById("bgPromptInput");
+    const bgPreviewBtn = document.getElementById("bgPreviewBtn");
+    const bgPreviewContainer = document.getElementById("bgPreviewContainer");
+    const bgPreviewImg = document.getElementById("bgPreviewImg");
+    const bgStage = document.getElementById("stage-bg_change");
+
+    // Toggle background feature
+    if (bgToggle) {
+        bgToggle.addEventListener("change", () => {
+            bgEnabled = bgToggle.checked;
+            bgOptions.style.display = bgEnabled ? "block" : "none";
+            if (bgStage) bgStage.style.display = bgEnabled ? "" : "none";
+            // Update progress grid columns
+            const stagesGrid = document.querySelector(".progress-stages");
+            if (stagesGrid) {
+                stagesGrid.style.gridTemplateColumns = bgEnabled ? "repeat(5, 1fr)" : "repeat(4, 1fr)";
+            }
+        });
+    }
+
+    // Tab switching
+    bgTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+            bgTabs.forEach((t) => t.classList.remove("active"));
+            tab.classList.add("active");
+            bgMode = tab.dataset.mode;
+            bgPromptMode.style.display = bgMode === "prompt" ? "block" : "none";
+            bgUploadMode.style.display = bgMode === "upload" ? "block" : "none";
+        });
+    });
+
+    // Preset prompt buttons
+    document.querySelectorAll(".bg-preset-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".bg-preset-btn").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            bgPromptInput.value = btn.dataset.prompt;
+        });
+    });
+
+    // Preview generation
+    if (bgPreviewBtn) {
+        bgPreviewBtn.addEventListener("click", async () => {
+            const prompt = bgPromptInput.value.trim();
+            if (!prompt) {
+                alert("Enter a background description first.");
+                return;
+            }
+            bgPreviewBtn.disabled = true;
+            bgPreviewBtn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;"></span>';
+            bgPreviewContainer.style.display = "none";
+
+            try {
+                const resp = await fetch("/api/generate-bg", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || "Generation failed");
+                }
+                const blob = await resp.blob();
+                bgPreviewImg.src = URL.createObjectURL(blob);
+                bgPreviewContainer.style.display = "block";
+            } catch (err) {
+                alert("Background generation failed: " + err.message);
+            } finally {
+                bgPreviewBtn.disabled = false;
+                bgPreviewBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+            }
+        });
+    }
+
+    // Background image upload zone
+    const bgUploadZone = document.getElementById("bgUploadZone");
+    const bgImageInput = document.getElementById("bg_image");
+    if (bgUploadZone && bgImageInput) {
+        bgUploadZone.addEventListener("click", (e) => {
+            if (e.target.closest(".remove-btn") || e.target.closest(".file-preview")) return;
+            bgImageInput.click();
+        });
+        bgUploadZone.addEventListener("dragover", (e) => { e.preventDefault(); bgUploadZone.classList.add("drag-over"); });
+        bgUploadZone.addEventListener("dragleave", () => { bgUploadZone.classList.remove("drag-over"); });
+        bgUploadZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            bgUploadZone.classList.remove("drag-over");
+            if (e.dataTransfer.files.length > 0) {
+                bgImageInput.files = e.dataTransfer.files;
+                showBgImagePreview(e.dataTransfer.files[0]);
+            }
+        });
+        bgImageInput.addEventListener("change", () => {
+            if (bgImageInput.files.length > 0) showBgImagePreview(bgImageInput.files[0]);
+        });
+    }
+
+    function showBgImagePreview(file) {
+        const zone = document.getElementById("bgUploadZone");
+        const preview = document.getElementById("bgImagePreview");
+        const img = document.getElementById("bgImagePreviewImg");
+        const fileName = preview.querySelector(".file-name");
+
+        zone.classList.add("has-file");
+        zone.querySelector(".upload-icon").style.display = "none";
+        zone.querySelector(".upload-text").style.display = "none";
+        zone.querySelector(".upload-hint").style.display = "none";
+
+        img.src = URL.createObjectURL(file);
+        fileName.textContent = file.name;
+        preview.style.display = "block";
+    }
 
     // ─── Drag & Drop + Click Upload ──────────────────────
     uploadZones.forEach((zone) => {
@@ -297,6 +418,15 @@ document.addEventListener("DOMContentLoaded", () => {
         formData.append("language", document.getElementById("language").value);
         formData.append("voice_name", document.getElementById("voice_name").value);
 
+        // Background change params
+        if (bgEnabled) {
+            if (bgMode === "prompt" && bgPromptInput.value.trim()) {
+                formData.append("bg_prompt", bgPromptInput.value.trim());
+            } else if (bgMode === "upload" && bgImageInput && bgImageInput.files.length > 0) {
+                formData.append("bg_image", bgImageInput.files[0]);
+            }
+        }
+
         // Show progress, hide form
         form.style.display = "none";
         resultSection.style.display = "none";
@@ -365,7 +495,9 @@ document.addEventListener("DOMContentLoaded", () => {
         progressMessage.textContent = data.message || "Processing...";
 
         // Update stage indicators
-        const stageOrder = ["extract_audio", "voice_clone", "face_swap", "combine"];
+        const stageOrder = bgEnabled
+            ? ["extract_audio", "voice_clone", "face_swap", "bg_change", "combine"]
+            : ["extract_audio", "voice_clone", "face_swap", "combine"];
         const currentStage = data.stage;
         const currentIndex = stageOrder.indexOf(currentStage);
 
@@ -385,7 +517,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         // Overall progress estimation
-        const stageWeights = { extract_audio: 10, voice_clone: 35, face_swap: 45, combine: 10 };
+        const stageWeights = bgEnabled
+            ? { extract_audio: 5, voice_clone: 25, face_swap: 30, bg_change: 30, combine: 10 }
+            : { extract_audio: 10, voice_clone: 35, face_swap: 45, combine: 10 };
         let overallProgress = 0;
         stageOrder.forEach((stage, i) => {
             if (i < currentIndex) {
@@ -489,6 +623,30 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedCartoonFace = null;
         document.getElementById("cartoon_face").value = "";
         document.querySelectorAll(".cartoon-card").forEach((c) => c.classList.remove("selected"));
+
+        // Reset background UI
+        bgEnabled = false;
+        if (bgToggle) bgToggle.checked = false;
+        if (bgOptions) bgOptions.style.display = "none";
+        if (bgStage) bgStage.style.display = "none";
+        if (bgPromptInput) bgPromptInput.value = "";
+        if (bgPreviewContainer) bgPreviewContainer.style.display = "none";
+        if (bgImageInput) bgImageInput.value = "";
+        document.querySelectorAll(".bg-preset-btn").forEach((b) => b.classList.remove("active"));
+        const bgZone = document.getElementById("bgUploadZone");
+        if (bgZone) {
+            bgZone.classList.remove("has-file");
+            const icon = bgZone.querySelector(".upload-icon");
+            const text = bgZone.querySelector(".upload-text");
+            const hint = bgZone.querySelector(".upload-hint");
+            if (icon) icon.style.display = "";
+            if (text) text.style.display = "";
+            if (hint) hint.style.display = "";
+            const prev = document.getElementById("bgImagePreview");
+            if (prev) prev.style.display = "none";
+        }
+        const stagesGrid = document.querySelector(".progress-stages");
+        if (stagesGrid) stagesGrid.style.gridTemplateColumns = "repeat(4, 1fr)";
     }
 
     newCloneBtn.addEventListener("click", resetUI);

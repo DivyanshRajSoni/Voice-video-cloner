@@ -21,6 +21,7 @@ from typing import Optional, Callable
 
 from core.face_swapper import FaceSwapper
 from core.voice_cloner import VoiceCloner
+from core.background_changer import BackgroundChanger
 
 logger = logging.getLogger("VideoProcessor")
 
@@ -31,7 +32,8 @@ class VideoProcessor:
     1. Extract audio from source video
     2. Clone voice (transcribe → translate → synthesize)
     3. Process video frames (face swap)
-    4. Combine processed video + cloned audio (high-quality encoding)
+    4. AI background replacement (optional)
+    5. Combine processed video + cloned audio (high-quality encoding)
     """
 
     def __init__(self, models_dir: str = "models", output_dir: str = "outputs"):
@@ -39,6 +41,7 @@ class VideoProcessor:
         self.output_dir = output_dir
         self.face_swapper = FaceSwapper(model_dir=models_dir)
         self.voice_cloner = VoiceCloner()
+        self.background_changer = BackgroundChanger()
         os.makedirs(output_dir, exist_ok=True)
 
     def process(
@@ -48,6 +51,8 @@ class VideoProcessor:
         target_voice_path: str,
         language: str = "en",
         voice_name: str = "",
+        bg_image_path: Optional[str] = None,
+        bg_prompt: Optional[str] = None,
         progress_callback: Optional[Callable] = None
     ) -> dict:
         """
@@ -59,6 +64,8 @@ class VideoProcessor:
             target_voice_path: Path to target persona voice audio/video.
             language: Target language for voice synthesis.
             voice_name: Specific voice persona key.
+            bg_image_path: Path to custom background image (optional).
+            bg_prompt: Text prompt for AI background generation (optional).
             progress_callback: fn(stage, percent, message).
 
         Returns:
@@ -163,13 +170,85 @@ class VideoProcessor:
                                   f"Face swap complete ({swap_stats['swap_rate']} frames swapped).")
 
             # ──────────────────────────────────────
-            # Stage 4: Combine video + cloned audio
+            # Stage 4: Background Change (optional)
+            # ──────────────────────────────────────
+            video_for_combine = swapped_video_path
+
+            if bg_image_path or bg_prompt:
+                self._update_progress(progress_callback, "bg_change", 0,
+                                      "Preparing AI background replacement...")
+                t0 = time.time()
+
+                # Free face swap GPU memory before bg processing
+                import gc
+                gc.collect()
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except ImportError:
+                    pass
+
+                # Get or generate background image
+                if bg_image_path and os.path.exists(bg_image_path):
+                    bg_image = cv2.imread(bg_image_path)
+                    if bg_image is None:
+                        raise ValueError(f"Cannot read background image: {bg_image_path}")
+                    logger.info(f"Using uploaded background: {bg_image_path}")
+                elif bg_prompt:
+                    self._update_progress(progress_callback, "bg_change", 5,
+                                          f"Generating background: '{bg_prompt[:50]}...'")
+                    bg_save_path = os.path.join(job_dir, "generated_bg.png")
+                    bg_image = self.background_changer.generate_background(
+                        prompt=bg_prompt,
+                        width=1280,
+                        height=720,
+                        output_path=bg_save_path,
+                    )
+                    logger.info(f"AI background generated from prompt")
+                else:
+                    bg_image = None
+
+                if bg_image is not None:
+                    self._update_progress(progress_callback, "bg_change", 15,
+                                          "Replacing background frame by frame...")
+                    bg_video_path = os.path.join(job_dir, "bg_video.mp4")
+
+                    def bg_progress(pct, msg):
+                        # Scale: 15-95% of bg_change stage
+                        scaled = 15 + int(pct * 0.8)
+                        self._update_progress(progress_callback, "bg_change", scaled, msg)
+
+                    self.background_changer.process_video_background(
+                        input_path=swapped_video_path,
+                        output_path=bg_video_path,
+                        background=bg_image,
+                        progress_callback=bg_progress,
+                    )
+                    video_for_combine = bg_video_path
+
+                result["stages"]["bg_change"] = f"complete ({time.time()-t0:.1f}s)"
+                self._update_progress(progress_callback, "bg_change", 100,
+                                      "Background replaced successfully.")
+
+                # Free segmentation model memory
+                self.background_changer.cleanup()
+                gc.collect()
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except ImportError:
+                    pass
+
+            # ──────────────────────────────────────
+            # Stage 5: Combine video + cloned audio
             # ──────────────────────────────────────
             self._update_progress(progress_callback, "combine", 0,
                                   "Encoding final video with high-quality settings...")
             t0 = time.time()
             output_video_path = os.path.join(job_dir, f"output_{job_id}.mp4")
-            self._combine_video_audio(swapped_video_path, cloned_audio_path, output_video_path)
+            self._combine_video_audio(video_for_combine, cloned_audio_path, output_video_path)
             result["stages"]["combine"] = f"complete ({time.time()-t0:.1f}s)"
 
             # Output file stats

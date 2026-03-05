@@ -16,6 +16,7 @@ import uuid
 import time
 import logging
 import threading
+import cv2
 from datetime import datetime
 from flask import (
     Flask, render_template, request, jsonify,
@@ -212,6 +213,7 @@ def start_clone():
     target_voice = request.files["target_voice"]
     language = request.form.get("language", "en")
     voice_name = request.form.get("voice_name", "")
+    bg_prompt = request.form.get("bg_prompt", "").strip()
 
     # Validate file types
     if not source_video.filename or get_file_ext(source_video.filename) not in ALLOWED_VIDEO_EXT:
@@ -243,6 +245,14 @@ def start_clone():
 
     voice_path = save_upload(target_voice, "voice")
 
+    # Handle background image upload (optional)
+    bg_image_path = None
+    if "bg_image" in request.files and request.files["bg_image"].filename:
+        bg_file = request.files["bg_image"]
+        bg_ext = get_file_ext(bg_file.filename)
+        if bg_ext in ALLOWED_IMAGE_EXT:
+            bg_image_path = save_upload(bg_file, "bg")
+
     # Create job
     job_id = str(uuid.uuid4())[:8]
     _write_job(job_id, {
@@ -257,7 +267,8 @@ def start_clone():
     # Run processing in background thread
     thread = threading.Thread(
         target=_run_cloning_job,
-        args=(job_id, source_path, face_path, voice_path, language, voice_name),
+        args=(job_id, source_path, face_path, voice_path, language, voice_name,
+              bg_image_path, bg_prompt),
         daemon=True
     )
     thread.start()
@@ -265,7 +276,8 @@ def start_clone():
     return jsonify({"job_id": job_id, "status": "queued"}), 202
 
 
-def _run_cloning_job(job_id, source_path, face_path, voice_path, language, voice_name=""):
+def _run_cloning_job(job_id, source_path, face_path, voice_path, language,
+                     voice_name="", bg_image_path=None, bg_prompt=None):
     """Run the cloning pipeline in a background thread."""
     def progress_callback(stage, percent, message):
         _update_job(job_id, stage=stage, progress=percent, message=message, status="processing")
@@ -279,6 +291,8 @@ def _run_cloning_job(job_id, source_path, face_path, voice_path, language, voice
             target_voice_path=voice_path,
             language=language,
             voice_name=voice_name,
+            bg_image_path=bg_image_path if bg_image_path else None,
+            bg_prompt=bg_prompt if bg_prompt else None,
             progress_callback=progress_callback
         )
 
@@ -343,7 +357,7 @@ def health():
     disk = shutil.disk_usage(BASE_DIR)
     return jsonify({
         "status": "ok",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "timestamp": datetime.now().isoformat(),
         "gpu": gpu_info,
         "disk": {
@@ -353,6 +367,35 @@ def health():
         },
         "active_jobs": _count_active_jobs(),
     })
+
+
+@app.route("/api/generate-bg", methods=["POST"])
+def generate_bg_preview():
+    """
+    Generate a background image from a text prompt (for preview).
+    Returns the generated image as JPEG.
+    """
+    data = request.get_json()
+    prompt = data.get("prompt", "").strip() if data else ""
+    if not prompt:
+        return jsonify({"error": "Prompt is required."}), 400
+
+    try:
+        from core.background_changer import BackgroundChanger
+        changer = BackgroundChanger()
+        bg = changer.generate_background(prompt=prompt, width=1280, height=720)
+
+        # Encode to JPEG and return
+        import io
+        _, buf = cv2.imencode(".jpg", bg, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return app.response_class(
+            response=buf.tobytes(),
+            status=200,
+            mimetype="image/jpeg",
+        )
+    except Exception as e:
+        logger.error(f"Background generation failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/voices")

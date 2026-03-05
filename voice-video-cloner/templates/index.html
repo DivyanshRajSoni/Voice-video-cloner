@@ -210,6 +210,81 @@
                     </select>
                 </div>
 
+                <!-- Step 4: AI Background Change (Optional) -->
+                <div class="upload-section bg-section">
+                    <div class="section-header">
+                        <span class="step-badge">4</span>
+                        <div style="flex:1;">
+                            <h3>AI Background Change <span class="optional-badge">Optional</span></h3>
+                            <p>Replace video background with AI-generated or custom image</p>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="bgToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div id="bgOptions" class="bg-options" style="display:none;">
+                        <!-- Mode Tabs -->
+                        <div class="bg-tabs">
+                            <button type="button" class="bg-tab active" data-mode="prompt">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                                AI Generate
+                            </button>
+                            <button type="button" class="bg-tab" data-mode="upload">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                                Upload Image
+                            </button>
+                        </div>
+
+                        <!-- AI Prompt Mode -->
+                        <div id="bgPromptMode" class="bg-mode-panel">
+                            <div class="bg-prompt-input">
+                                <input type="text" id="bgPromptInput" name="bg_prompt" placeholder="Describe your background... e.g., 'modern office with city skyline view'" maxlength="300">
+                                <button type="button" id="bgPreviewBtn" class="bg-preview-btn" title="Generate Preview">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
+                            <div class="bg-presets">
+                                <span class="preset-label">Quick prompts:</span>
+                                <button type="button" class="bg-preset-btn" data-prompt="modern professional office with glass windows and city skyline">🏢 Office</button>
+                                <button type="button" class="bg-preset-btn" data-prompt="tropical beach with crystal clear water and palm trees at sunset">🏖️ Beach</button>
+                                <button type="button" class="bg-preset-btn" data-prompt="outer space galaxy with colorful nebula and stars">🌌 Space</button>
+                                <button type="button" class="bg-preset-btn" data-prompt="beautiful mountain landscape with snow peaks and green valley">🏔️ Mountain</button>
+                                <button type="button" class="bg-preset-btn" data-prompt="futuristic neon cyberpunk city at night with glowing lights">🌃 Neon City</button>
+                                <button type="button" class="bg-preset-btn" data-prompt="cozy library interior with wooden bookshelves and warm lighting">📚 Library</button>
+                            </div>
+                            <div id="bgPreviewContainer" class="bg-preview-container" style="display:none;">
+                                <img id="bgPreviewImg" class="bg-preview-img" alt="Generated Background">
+                                <p class="bg-preview-hint">This background will be applied to your video</p>
+                            </div>
+                        </div>
+
+                        <!-- Upload Mode -->
+                        <div id="bgUploadMode" class="bg-mode-panel" style="display:none;">
+                            <div class="upload-zone bg-upload-zone" id="bgUploadZone" data-input="bg_image">
+                                <div class="upload-icon">
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                                        <polyline points="21 15 16 10 5 21"/>
+                                    </svg>
+                                </div>
+                                <p class="upload-text">Drag & drop or <span class="browse-link">browse</span></p>
+                                <p class="upload-hint">JPG, PNG, WebP (recommended: 1280x720+)</p>
+                                <input type="file" name="bg_image" id="bg_image" accept="image/*" hidden>
+                                <div class="file-preview" id="bgImagePreview" style="display:none;">
+                                    <img id="bgImagePreviewImg" alt="Background">
+                                    <div class="file-info">
+                                        <span class="file-name"></span>
+                                        <button type="button" class="remove-btn" data-target="bg_image">&times;</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Submit Button -->
                 <button type="submit" class="submit-btn" id="submitBtn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -240,6 +315,10 @@
                     <div class="stage" id="stage-face_swap">
                         <div class="stage-indicator"></div>
                         <span>AI Face Swap</span>
+                    </div>
+                    <div class="stage" id="stage-bg_change" style="display:none;">
+                        <div class="stage-indicator"></div>
+                        <span>BG Change</span>
                     </div>
                     <div class="stage" id="stage-combine">
                         <div class="stage-indicator"></div>
@@ -285,8 +364,8 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Voice & Video Cloner v2.0 &mdash; Powered by InsightFace, Whisper AI & Edge-TTS</p>
-            <p class="disclaimer">GPU-accelerated · 16+ languages · Real-time translation · HD output</p>
+            <p>Voice & Video Cloner v2.1 &mdash; Powered by InsightFace, Whisper AI, Edge-TTS & U2-Net</p>
+            <p class="disclaimer">GPU-accelerated · 16+ languages · Real-time translation · HD output · AI Background Change</p>
         </footer>
     </div>
 
