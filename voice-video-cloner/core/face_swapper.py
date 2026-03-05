@@ -18,6 +18,7 @@ class FaceSwapper:
     def __init__(self, model_dir: str = "models"):
         self.model_dir = model_dir
         self.det_model = None
+        self.rec_model = None
         self.swap_model = None
         self._initialized = False
 
@@ -48,6 +49,18 @@ class FaceSwapper:
         self.det_model = insightface.model_zoo.get_model(det_path, providers=providers, session_options=sess_opts)
         self.det_model.prepare(ctx_id=0, input_size=(320, 320), det_thresh=0.5)
         print("[FaceSwapper] Detection model loaded.")
+
+        gc.collect()
+
+        # ── Load recognition model (~270MB, needed for face embeddings) ──
+        rec_path = os.path.join(self.model_dir, "models", "buffalo_l", "w600k_r50.onnx")
+        if os.path.exists(rec_path):
+            print(f"[FaceSwapper] Loading recognition model ({os.path.getsize(rec_path) // 1024 // 1024}MB)...")
+            self.rec_model = insightface.model_zoo.get_model(rec_path, providers=providers, session_options=sess_opts)
+            self.rec_model.prepare(ctx_id=0)
+            print("[FaceSwapper] Recognition model loaded.")
+        else:
+            print(f"[FaceSwapper] WARNING: Recognition model not found at {rec_path}")
 
         gc.collect()
 
@@ -84,6 +97,9 @@ class FaceSwapper:
         faces = []
         for i in range(bboxes.shape[0]):
             face = insightface.app.common.Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
+            # Compute face embedding (required by inswapper)
+            if self.rec_model is not None:
+                self.rec_model.get(frame, face)
             faces.append(face)
         return faces
 
