@@ -34,13 +34,18 @@ APP_USER="ubuntu"
 # ──────────────────────────────────────────────────────────
 echo "[1/7] Installing system packages..."
 sudo apt update && sudo apt upgrade -y
+
+# Detect Python version (Ubuntu 24.04 has 3.12, Ubuntu 22.04 has 3.10)
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+echo "  Detected Python ${PYTHON_VERSION}"
+
 sudo apt install -y \
-    python3.10 python3.10-venv python3-pip \
+    python3 python3-venv python3-pip python3-full \
     ffmpeg \
     nginx \
     git curl wget unzip \
     build-essential cmake \
-    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    libgl1-mesa-dev libglib2.0-0 libsm6 libxext6 libxrender-dev \
     libsndfile1 \
     supervisor
 
