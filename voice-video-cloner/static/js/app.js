@@ -414,9 +414,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const resultVideo = document.getElementById("resultVideo");
         const downloadBtn = document.getElementById("downloadBtn");
+        const resultStats = document.getElementById("resultStats");
 
         resultVideo.src = `/api/download/${jobId}`;
         downloadBtn.href = `/api/download/${jobId}`;
+
+        // Fetch final status to show stats
+        fetch(`/api/status/${jobId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.stats) {
+                    const parts = [];
+                    if (data.stats.total_time_seconds) parts.push(`${data.stats.total_time_seconds}s total`);
+                    if (data.stats.output_size_mb) parts.push(`${data.stats.output_size_mb} MB`);
+                    if (data.stats.face_swap && data.stats.face_swap.swap_rate) parts.push(`${data.stats.face_swap.swap_rate} faces swapped`);
+                    if (resultStats && parts.length) resultStats.textContent = parts.join(" \u00b7 ");
+                }
+            })
+            .catch(() => {});
 
         submitBtn.disabled = false;
         submitBtn.innerHTML = `
@@ -452,9 +467,10 @@ document.addEventListener("DOMContentLoaded", () => {
         resetProgress();
 
         // Reset file inputs
-        ["source_video", "target_face", "target_voice"].forEach((id) => {
+        ["source_video", "target_voice"].forEach((id) => {
             const input = document.getElementById(id);
             const zone = document.querySelector(`[data-input="${id}"]`);
+            if (!input || !zone) return;
             input.value = "";
             zone.classList.remove("has-file");
 

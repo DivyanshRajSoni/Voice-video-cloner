@@ -1,28 +1,30 @@
 # ═══════════════════════════════════════════════════════════
-# Voice & Video Cloner - Dependencies
+# Voice & Video Cloner v2.0 — Production Dependencies
 # ═══════════════════════════════════════════════════════════
 
 # Web Framework
 flask>=3.0.0
 werkzeug>=3.0.0
+gunicorn>=22.0.0
 
 # Computer Vision & Video
 opencv-python>=4.8.0
 numpy>=1.24.0
-moviepy>=1.0.3
+moviepy>=2.0.0
 
 # AI / Face Swap
 insightface>=0.7.3
 onnxruntime>=1.16.0
 # onnxruntime-gpu>=1.16.0  # Uncomment for GPU acceleration
 
-# Voice Cloning (Coqui TTS with XTTS-v2)
-TTS>=0.22.0
+# Voice Synthesis
 edge-tts>=7.0.0
 
-# Speech-to-Text
-openai-whisper>=20231117
+# Speech-to-Text (faster-whisper — CTranslate2 based, GPU optimized)
 faster-whisper>=1.0.0
+
+# Translation
+deep-translator>=1.11.4
 
 # Deep Learning
 torch>=2.0.0
@@ -30,6 +32,3 @@ torchaudio>=2.0.0
 
 # Utilities
 pillow>=10.0.0
-
-# Translation
-deep-translator>=1.11.4

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice & Video Cloner</title>
+    <title>Voice & Video Cloner — AI-Powered Face Swap & Voice Translation</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -32,7 +32,7 @@
                 </svg>
                 <h1>Voice & Video Cloner</h1>
             </div>
-            <p class="subtitle">Upload a 30-second video and transform into any persona with AI-powered face swap and voice cloning</p>
+            <p class="subtitle">Transform any video with AI-powered face swap, voice cloning, and real-time translation across 16+ languages</p>
         </header>
 
         <!-- Main Content -->
@@ -235,15 +235,15 @@
                     </div>
                     <div class="stage" id="stage-voice_clone">
                         <div class="stage-indicator"></div>
-                        <span>Clone Voice</span>
+                        <span>Transcribe & Translate</span>
                     </div>
                     <div class="stage" id="stage-face_swap">
                         <div class="stage-indicator"></div>
-                        <span>Face Swap</span>
+                        <span>AI Face Swap</span>
                     </div>
                     <div class="stage" id="stage-combine">
                         <div class="stage-indicator"></div>
-                        <span>Combine Output</span>
+                        <span>HD Encoding</span>
                     </div>
                 </div>
                 <p class="progress-message" id="progressMessage">Initializing...</p>
@@ -256,6 +256,7 @@
                         <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                     <h3>Cloning Complete!</h3>
+                    <p id="resultStats" class="result-stats" style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;"></p>
                 </div>
                 <div class="result-video">
                     <video id="resultVideo" controls></video>
@@ -284,8 +285,8 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Voice & Video Cloner &mdash; Powered by InsightFace & Coqui XTTS-v2</p>
-            <p class="disclaimer">For educational and research purposes only. Respect privacy and consent.</p>
+            <p>Voice & Video Cloner v2.0 &mdash; Powered by InsightFace, Whisper AI & Edge-TTS</p>
+            <p class="disclaimer">GPU-accelerated · 16+ languages · Real-time translation · HD output</p>
         </footer>
     </div>
 

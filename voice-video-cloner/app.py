@@ -1,11 +1,20 @@
 """
-Voice & Video Cloner - Flask Web Application
-Upload a 30-second video and a target persona to generate a cloned output.
+Voice & Video Cloner — Production Flask Application
+
+Features:
+- File-based job tracking (multi-worker safe)
+- Automatic cleanup of old jobs and uploads
+- Input validation and security
+- Structured logging
+- Health check with system metrics
+- GPU-accelerated AI pipeline
 """
 
 import os
 import json
 import uuid
+import time
+import logging
 import threading
 from datetime import datetime
 from flask import (
@@ -13,6 +22,14 @@ from flask import (
     send_file, url_for
 )
 from werkzeug.utils import secure_filename
+
+# ─── Logging Setup ───────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("App")
 
 # Lazy import - VideoProcessor needs heavy ML dependencies
 VideoProcessor = None
@@ -35,12 +52,17 @@ ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 ALLOWED_AUDIO_EXT = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
 ALL_ALLOWED = ALLOWED_VIDEO_EXT | ALLOWED_IMAGE_EXT | ALLOWED_AUDIO_EXT
 
-MAX_CONTENT_LENGTH = 200 * 1024 * 1024  # 200MB
+MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB for production
+MAX_VIDEO_SIZE = 300 * 1024 * 1024       # 300MB per video
+MAX_AUDIO_SIZE = 100 * 1024 * 1024       # 100MB per audio
+MAX_IMAGE_SIZE = 20 * 1024 * 1024        # 20MB per image
+JOB_RETENTION_HOURS = 24                 # Auto-cleanup after 24h
 
 # ─── App Setup ───────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24))
+app.config["JSON_SORT_KEYS"] = False
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -286,6 +308,7 @@ def job_status(job_id):
         "stage": job.get("stage", ""),
         "progress": job.get("progress", 0),
         "message": job.get("message", ""),
+        "stats": job.get("result", {}).get("stats", {}) if job.get("result") else {},
     })
 
 
@@ -314,11 +337,21 @@ def download_result(job_id):
 
 @app.route("/api/health")
 def health():
-    """Health check endpoint."""
+    """Health check endpoint with system metrics."""
+    gpu_info = _get_gpu_info()
+    import shutil
+    disk = shutil.disk_usage(BASE_DIR)
     return jsonify({
         "status": "ok",
+        "version": "2.0.0",
         "timestamp": datetime.now().isoformat(),
-        "gpu_available": _check_gpu(),
+        "gpu": gpu_info,
+        "disk": {
+            "total_gb": round(disk.total / (1024**3), 1),
+            "free_gb": round(disk.free / (1024**3), 1),
+            "used_pct": round((disk.used / disk.total) * 100, 1),
+        },
+        "active_jobs": _count_active_jobs(),
     })
 
 
@@ -332,13 +365,34 @@ def list_voices():
     })
 
 
-def _check_gpu():
-    """Check if CUDA GPU is available."""
+def _get_gpu_info():
+    """Get GPU information."""
     try:
         import torch
-        return torch.cuda.is_available()
+        if torch.cuda.is_available():
+            return {
+                "available": True,
+                "name": torch.cuda.get_device_name(0),
+                "memory_total_gb": round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1),
+                "memory_free_gb": round((torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)) / (1024**3), 1),
+            }
     except ImportError:
-        return False
+        pass
+    return {"available": False}
+
+
+def _count_active_jobs():
+    """Count currently processing jobs."""
+    count = 0
+    try:
+        for fname in os.listdir(JOBS_DIR):
+            if fname.endswith('.json'):
+                job = _read_job(fname.replace('.json', ''))
+                if job and job.get('status') in ('queued', 'processing'):
+                    count += 1
+    except Exception:
+        pass
+    return count
 
 
 # ─── Main ────────────────────────────────────────────────────────
