@@ -95,59 +95,83 @@ class BackgroundChanger:
     # AI Background Generation (HuggingFace Inference API)
     # ──────────────────────────────────────────────────────
 
-    def _generate_via_legacy_api(
+    def _generate_via_pollinations(
         self,
         prompt: str,
-        model_id: str,
-        token: str,
         width: int = 1280,
         height: int = 720,
     ) -> Optional[Image.Image]:
         """
-        Call HuggingFace legacy Inference API directly via requests.
-        This bypasses the Inference Providers router that requires
-        special token permissions.
+        Generate background image via Pollinations.ai (free, no auth needed).
+        Uses FLUX model under the hood.
         """
         import requests as req
         from io import BytesIO
+        from urllib.parse import quote
 
-        url = f"https://api-inference.huggingface.co/models/{model_id}"
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        encoded = quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true&seed={int(time.time())}"
 
-        payload = {"inputs": prompt}
-        # Note: legacy API doesn't support width/height for all models
-
-        logger.info(f"Generating background with {model_id} (legacy API)...")
+        logger.info("Generating background via Pollinations.ai (free API)...")
         t0 = time.time()
 
-        resp = req.post(url, headers=headers, json=payload, timeout=120)
-
-        if resp.status_code == 503:
-            # Model is loading — wait and retry once
-            wait_time = 30
-            try:
-                body = resp.json()
-                wait_time = min(body.get("estimated_time", 30), 60)
-            except Exception:
-                pass
-            logger.info(f"Model {model_id} is loading, waiting {wait_time:.0f}s...")
-            time.sleep(wait_time)
-            resp = req.post(url, headers=headers, json=payload, timeout=120)
+        resp = req.get(url, timeout=120, allow_redirects=True)
 
         if resp.status_code != 200:
-            error_msg = resp.text[:200]
-            try:
-                error_msg = resp.json().get("error", error_msg)
-            except Exception:
-                pass
-            raise RuntimeError(f"HTTP {resp.status_code}: {error_msg}")
+            raise RuntimeError(f"Pollinations.ai returned HTTP {resp.status_code}")
 
-        # Response is raw image bytes
+        content_type = resp.headers.get("content-type", "")
+        if "image" not in content_type:
+            raise RuntimeError(f"Pollinations.ai returned non-image: {content_type}")
+
         image = Image.open(BytesIO(resp.content))
-        logger.info(f"Background generated in {time.time()-t0:.1f}s with {model_id} (legacy API)")
+        logger.info(f"Background generated in {time.time()-t0:.1f}s via Pollinations.ai")
         return image
+
+    def _generate_via_hf_router(
+        self,
+        prompt: str,
+        token: Optional[str],
+        width: int = 1280,
+        height: int = 720,
+    ) -> Optional[Image.Image]:
+        """
+        Generate background via HuggingFace Inference Providers (router).
+        Requires HF token with 'Make calls to Inference Providers' permission.
+        """
+        try:
+            from huggingface_hub import InferenceClient
+        except ImportError:
+            logger.warning("huggingface_hub not installed")
+            return None
+
+        models = [
+            "black-forest-labs/FLUX.1-schnell",
+            "stabilityai/stable-diffusion-xl-base-1.0",
+        ]
+
+        for model_id in models:
+            for provider in ["hf-inference", None]:
+                try:
+                    client_kwargs = {"token": token}
+                    if provider:
+                        client_kwargs["provider"] = provider
+                    prov_label = provider or "auto"
+                    logger.info(f"Trying {model_id} via HF router (provider={prov_label})...")
+                    client = InferenceClient(**client_kwargs)
+                    t0 = time.time()
+                    image = client.text_to_image(
+                        prompt=prompt,
+                        model=model_id,
+                        width=width,
+                        height=height,
+                    )
+                    logger.info(f"Background generated in {time.time()-t0:.1f}s with {model_id}")
+                    return image
+                except Exception as e:
+                    logger.warning(f"HF router {model_id} ({prov_label}) failed: {e}")
+                    continue
+        return None
 
     def generate_background(
         self,
@@ -157,21 +181,16 @@ class BackgroundChanger:
         output_path: Optional[str] = None,
     ) -> np.ndarray:
         """
-        Generate a background image from text prompt using HuggingFace API.
+        Generate a background image from text prompt.
 
-        Strategy:
-        1. Try legacy Inference API (works with basic tokens)
-        2. Fall back to InferenceClient with hf-inference provider
-        3. Fall back to InferenceClient with auto provider
-
-        Set HF_TOKEN env variable for authentication.
+        Strategy (in order):
+        1. Pollinations.ai — free, no authentication needed, uses FLUX
+        2. HuggingFace Inference Providers — needs HF_TOKEN with proper permissions
 
         Returns:
             BGR numpy array of the generated background.
         """
         token = os.environ.get("HF_TOKEN", None)
-        if not token:
-            logger.warning("HF_TOKEN not set — API calls may fail or be rate-limited")
 
         # Enhance the prompt for better background quality
         enhanced = (
@@ -179,70 +198,32 @@ class BackgroundChanger:
             "detailed, sharp focus, 4k resolution, no people, no text, no watermark"
         )
 
-        models = [
-            "black-forest-labs/FLUX.1-schnell",
-            "stabilityai/stable-diffusion-xl-base-1.0",
-        ]
-
         image = None
         last_error = None
 
-        # ── Strategy 1: Legacy Inference API (most compatible) ──
-        for model_id in models:
-            try:
-                image = self._generate_via_legacy_api(
-                    prompt=enhanced,
-                    model_id=model_id,
-                    token=token,
-                    width=width,
-                    height=height,
-                )
-                if image:
-                    break
-            except Exception as e:
-                last_error = str(e)
-                logger.warning(f"Legacy API {model_id} failed: {e}")
-                continue
+        # ── Strategy 1: Pollinations.ai (free, no auth) ──
+        try:
+            image = self._generate_via_pollinations(
+                prompt=enhanced, width=width, height=height
+            )
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Pollinations.ai failed: {e}")
 
-        # ── Strategy 2: InferenceClient (if legacy failed) ──
+        # ── Strategy 2: HuggingFace Inference Providers ──
         if image is None:
             try:
-                from huggingface_hub import InferenceClient
-            except ImportError:
-                logger.warning("huggingface_hub not installed, skipping InferenceClient")
-                InferenceClient = None
-
-            if InferenceClient:
-                for model_id in models:
-                    for provider in ["hf-inference", None]:
-                        try:
-                            client_kwargs = {"token": token}
-                            if provider:
-                                client_kwargs["provider"] = provider
-                            prov_label = provider or "auto"
-                            logger.info(f"Trying {model_id} via InferenceClient (provider={prov_label})...")
-                            client = InferenceClient(**client_kwargs)
-                            t0 = time.time()
-                            image = client.text_to_image(
-                                prompt=enhanced,
-                                model=model_id,
-                                width=width,
-                                height=height,
-                            )
-                            logger.info(f"Background generated in {time.time()-t0:.1f}s with {model_id}")
-                            break
-                        except Exception as e:
-                            last_error = str(e)
-                            logger.warning(f"InferenceClient {model_id} ({prov_label}) failed: {e}")
-                            continue
-                    if image:
-                        break
+                image = self._generate_via_hf_router(
+                    prompt=enhanced, token=token, width=width, height=height
+                )
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"HF router failed: {e}")
 
         if image is None:
             raise RuntimeError(
                 f"All background generation methods failed. Last error: {last_error}. "
-                "Check HF_TOKEN permissions (needs 'Make calls to Inference Providers') "
-                "or try again later."
+                "Try again later or check your internet connection."
             )
 
         # PIL Image → numpy BGR
