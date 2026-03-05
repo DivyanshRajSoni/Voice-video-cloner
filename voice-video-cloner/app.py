@@ -46,9 +46,37 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-# ─── Job Tracking ────────────────────────────────────────────────
-jobs = {}  # job_id -> {status, progress, message, result}
-jobs_lock = threading.Lock()
+# ─── File-based Job Tracking (works across multiple gunicorn workers) ────
+JOBS_DIR = os.path.join(BASE_DIR, "jobs")
+os.makedirs(JOBS_DIR, exist_ok=True)
+
+
+def _job_path(job_id):
+    return os.path.join(JOBS_DIR, f"{job_id}.json")
+
+
+def _read_job(job_id):
+    path = _job_path(job_id)
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _write_job(job_id, data):
+    path = _job_path(job_id)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def _update_job(job_id, **kwargs):
+    job = _read_job(job_id)
+    if job:
+        job.update(kwargs)
+        _write_job(job_id, job)
 
 
 def allowed_file(filename):
@@ -158,15 +186,14 @@ def start_clone():
 
     # Create job
     job_id = str(uuid.uuid4())[:8]
-    with jobs_lock:
-        jobs[job_id] = {
-            "status": "queued",
-            "progress": 0,
-            "stage": "",
-            "message": "Job queued...",
-            "result": None,
-            "created_at": datetime.now().isoformat(),
-        }
+    _write_job(job_id, {
+        "status": "queued",
+        "progress": 0,
+        "stage": "",
+        "message": "Job queued...",
+        "result": None,
+        "created_at": datetime.now().isoformat(),
+    })
 
     # Run processing in background thread
     thread = threading.Thread(
@@ -182,12 +209,7 @@ def start_clone():
 def _run_cloning_job(job_id, source_path, face_path, voice_path, language, voice_name=""):
     """Run the cloning pipeline in a background thread."""
     def progress_callback(stage, percent, message):
-        with jobs_lock:
-            if job_id in jobs:
-                jobs[job_id]["stage"] = stage
-                jobs[job_id]["progress"] = percent
-                jobs[job_id]["message"] = message
-                jobs[job_id]["status"] = "processing"
+        _update_job(job_id, stage=stage, progress=percent, message=message, status="processing")
 
     try:
         VP = _get_video_processor()
@@ -201,20 +223,15 @@ def _run_cloning_job(job_id, source_path, face_path, voice_path, language, voice
             progress_callback=progress_callback
         )
 
-        with jobs_lock:
-            jobs[job_id]["result"] = result
-            if result["status"] == "complete":
-                jobs[job_id]["status"] = "complete"
-                jobs[job_id]["progress"] = 100
-                jobs[job_id]["message"] = "Cloning complete! Download your video."
-            else:
-                jobs[job_id]["status"] = "error"
-                jobs[job_id]["message"] = result.get("error", "Unknown error")
+        if result["status"] == "complete":
+            _update_job(job_id, result=result, status="complete", progress=100,
+                        message="Cloning complete! Download your video.")
+        else:
+            _update_job(job_id, result=result, status="error",
+                        message=result.get("error", "Unknown error"))
 
     except Exception as e:
-        with jobs_lock:
-            jobs[job_id]["status"] = "error"
-            jobs[job_id]["message"] = str(e)
+        _update_job(job_id, status="error", message=str(e))
         import traceback
         traceback.print_exc()
 
@@ -222,25 +239,23 @@ def _run_cloning_job(job_id, source_path, face_path, voice_path, language, voice
 @app.route("/api/status/<job_id>")
 def job_status(job_id):
     """Get the status of a cloning job."""
-    with jobs_lock:
-        job = jobs.get(job_id)
+    job = _read_job(job_id)
     if not job:
         return jsonify({"error": "Job not found."}), 404
 
     return jsonify({
         "job_id": job_id,
         "status": job["status"],
-        "stage": job["stage"],
-        "progress": job["progress"],
-        "message": job["message"],
+        "stage": job.get("stage", ""),
+        "progress": job.get("progress", 0),
+        "message": job.get("message", ""),
     })
 
 
 @app.route("/api/download/<job_id>")
 def download_result(job_id):
     """Download the output video for a completed job."""
-    with jobs_lock:
-        job = jobs.get(job_id)
+    job = _read_job(job_id)
 
     if not job:
         return jsonify({"error": "Job not found."}), 404

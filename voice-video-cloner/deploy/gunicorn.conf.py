@@ -12,8 +12,8 @@ bind = os.environ.get("BIND", "127.0.0.1:5000")
 # ─── Workers ─────────────────────────────────────────────
 # Keep low! Each worker loads AI models (~2-4 GB RAM each).
 # For GPU instances: 2 workers is optimal
-# For CPU instances: 1 worker (required for in-memory job tracking)
-workers = int(os.environ.get("WORKERS", 1))
+# For CPU instances: 2 workers (file-based job tracking supports multi-worker)
+workers = int(os.environ.get("WORKERS", 2))
 worker_class = "gthread"
 threads = 4
 
